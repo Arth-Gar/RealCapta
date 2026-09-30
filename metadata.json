@@ -1,0 +1,6 @@
+{
+  "name": "Controle de Captações Imobiliárias",
+  "description": "Sistema de gestão e triagem de captação de imóveis comerciais com fotos do Google Drive, integração com Google Sheets e controle de atendimentos de clientes interessados.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

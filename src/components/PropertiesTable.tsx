@@ -49,12 +49,13 @@ export const PropertiesTable: React.FC<PropertiesTableProps> = ({
   } | null>(null);
 
   const filteredProperties = properties.filter((item) => {
+    const term = searchTerm.toLowerCase();
     const matchesSearch =
-      item.address.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.ownerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.ownerPhone.includes(searchTerm) ||
-      item.referrerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (item.notes && item.notes.toLowerCase().includes(searchTerm.toLowerCase()));
+      (item.address || '').toLowerCase().includes(term) ||
+      (item.ownerName || '').toLowerCase().includes(term) ||
+      (item.ownerPhone || '').includes(searchTerm) ||
+      (item.referrerName || '').toLowerCase().includes(term) ||
+      ((item.notes || '').toLowerCase().includes(term));
 
     const matchesStatus = statusFilter === 'ALL' || item.status === statusFilter;
     const matchesType = typeFilter === 'ALL' || item.propertyType === typeFilter;
@@ -279,19 +280,25 @@ export const PropertiesTable: React.FC<PropertiesTableProps> = ({
                       {/* 4. Telefone de Contato (WhatsApp) */}
                       <td className="py-3 px-3 align-middle">
                         <div className="font-semibold text-slate-800 text-xs">
-                          {p.ownerPhone}
+                          {p.ownerPhone ? (
+                            p.ownerPhone
+                          ) : (
+                            <span className="text-slate-400 italic font-normal">Não informado</span>
+                          )}
                         </div>
-                        <div className="flex items-center gap-1.5 mt-1">
-                          <button
-                            type="button"
-                            onClick={() => onOpenWhatsApp(p, 'PROPERTY_OWNER')}
-                            className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[10px] font-semibold rounded-md border border-emerald-200 transition-colors"
-                            title="Iniciar conversa no WhatsApp"
-                          >
-                            <MessageSquare className="w-3 h-3" />
-                            WhatsApp
-                          </button>
-                        </div>
+                        {p.ownerPhone && (
+                          <div className="flex items-center gap-1.5 mt-1">
+                            <button
+                              type="button"
+                              onClick={() => onOpenWhatsApp(p, 'PROPERTY_OWNER')}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[10px] font-semibold rounded-md border border-emerald-200 transition-colors"
+                              title="Iniciar conversa no WhatsApp"
+                            >
+                              <MessageSquare className="w-3 h-3" />
+                              WhatsApp
+                            </button>
+                          </div>
+                        )}
                       </td>
 
                       {/* 5. Status da Captação (Triagem) */}

@@ -26,38 +26,40 @@ export const WhatsAppModal: React.FC<WhatsAppModalProps> = ({
   let defaultMessage = '';
 
   if (mode === 'PROPERTY_OWNER' && targetProperty) {
-    defaultPhone = targetProperty.ownerPhone;
-    defaultName = targetProperty.ownerName;
+    defaultPhone = targetProperty.ownerPhone || '';
+    defaultName = targetProperty.ownerName || '';
     const isPartner = targetProperty.ownerType !== 'PROPRIETARIO';
+    const addressText = targetProperty.address || 'região de interesse';
     
     if (isPartner) {
-      defaultMessage = `Olá ${defaultName || 'Corretor(a)'}! Tudo bem? Sou corretor comercial e vi a placa/anúncio no imóvel comercial na ${targetProperty.address}. Gostaria de verificar as condições para trabalharmos em parceria na divulgação deste ponto. Poderia me confirmar os valores e disponibilidade?`;
+      defaultMessage = `Olá ${defaultName || 'Corretor(a)'}! Tudo bem? Sou corretor comercial e vi a placa/anúncio no imóvel comercial na ${addressText}. Gostaria de verificar as condições para trabalharmos em parceria na divulgação deste ponto. Poderia me confirmar os valores e disponibilidade?`;
     } else {
-      defaultMessage = `Olá ${defaultName || 'Sr(a)'}! Tudo bem? Sou corretor de imóveis comerciais e passei em frente ao seu imóvel na ${targetProperty.address}. Tenho clientes corporativos buscando pontos nessa região e gostaria de confirmar se o imóvel ainda está disponível para locação/venda. Podemos conversar?`;
+      defaultMessage = `Olá ${defaultName || 'Sr(a)'}! Tudo bem? Sou corretor de imóveis comerciais e passei em frente ao seu imóvel na ${addressText}. Tenho clientes corporativos buscando pontos nessa região e gostaria de confirmar se o imóvel ainda está disponível para locação/venda. Podemos conversar?`;
     }
   } else if (mode === 'PROPERTY_REFERRER' && targetProperty) {
-    defaultPhone = targetProperty.referrerContact;
-    defaultName = targetProperty.referrerName;
-    defaultMessage = `Olá ${defaultName}! Tudo bem? Agradeço muito pela indicação do imóvel na ${targetProperty.address}. Já estamos em contato e fazendo a triagem com o proprietário. Te mantenho informado sobre o andamento!`;
+    defaultPhone = targetProperty.referrerContact || '';
+    defaultName = targetProperty.referrerName || '';
+    const addressText = targetProperty.address || 'região de interesse';
+    defaultMessage = `Olá ${defaultName || 'amigo(a)'}! Tudo bem? Agradeço muito pela indicação do imóvel na ${addressText}. Já estamos em contato e fazendo a triagem com o proprietário. Te mantenho informado sobre o andamento!`;
   } else if (mode === 'CLIENT_VISIT' && targetClient) {
-    defaultPhone = targetClient.phone;
-    defaultName = targetClient.name;
-    defaultMessage = `Olá ${defaultName}! Tudo bem? Sobre o imóvel comercial que conversamos (${targetProperty?.address || 'de seu interesse'}), gostaria de confirmar o agendamento de nossa visita técnica. Qual horário fica melhor para você?`;
+    defaultPhone = targetClient.phone || '';
+    defaultName = targetClient.name || '';
+    defaultMessage = `Olá ${defaultName || 'Cliente'}! Tudo bem? Sobre o imóvel comercial que conversamos (${targetProperty?.address || 'de seu interesse'}), gostaria de confirmar o agendamento de nossa visita técnica. Qual horário fica melhor para você?`;
   } else if (mode === 'CLIENT_PROPOSAL' && targetClient) {
-    defaultPhone = targetClient.phone;
-    defaultName = targetClient.name;
-    defaultMessage = `Olá ${defaultName}! Tudo bem? Estou entrando em contato referente à proposta do imóvel comercial na ${targetProperty?.address || 'região de seu interesse'}. Gostaria de alinhar os últimos detalhes comerciais para formalizarmos com o proprietário.`;
+    defaultPhone = targetClient.phone || '';
+    defaultName = targetClient.name || '';
+    defaultMessage = `Olá ${defaultName || 'Cliente'}! Tudo bem? Estou entrando em contato referente à proposta do imóvel comercial na ${targetProperty?.address || 'região de seu interesse'}. Gostaria de alinhar os últimos detalhes comerciais para formalizarmos com o proprietário.`;
   } else if (targetClient) {
-    defaultPhone = targetClient.phone;
-    defaultName = targetClient.name;
-    defaultMessage = `Olá ${defaultName}! Tudo bem? Gostaria de saber como andam seus planos de expansão/locação comercial e se posso te ajudar com novas opções na região pretendida.`;
+    defaultPhone = targetClient.phone || '';
+    defaultName = targetClient.name || '';
+    defaultMessage = `Olá ${defaultName || 'Cliente'}! Tudo bem? Gostaria de saber como andam seus planos de expansão/locação comercial e se posso te ajudar com novas opções na região pretendida.`;
   }
 
   const [phone, setPhone] = useState(defaultPhone);
   const [message, setMessage] = useState(defaultMessage);
 
-  const cleanPhone = phone.replace(/\D/g, '');
-  const formattedWhatsAppPhone = cleanPhone.length <= 11 && !cleanPhone.startsWith('55') ? `55${cleanPhone}` : cleanPhone;
+  const cleanPhone = (phone || '').replace(/\D/g, '');
+  const formattedWhatsAppPhone = cleanPhone.length > 0 && cleanPhone.length <= 11 && !cleanPhone.startsWith('55') ? `55${cleanPhone}` : cleanPhone;
   const whatsappUrl = `https://wa.me/${formattedWhatsAppPhone}?text=${encodeURIComponent(message)}`;
 
   const handleCopy = () => {

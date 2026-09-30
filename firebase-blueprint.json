@@ -1,0 +1,69 @@
+{
+  "entities": {
+    "Property": {
+      "title": "Property",
+      "description": "Commercial property capture record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "adImageName": { "type": "string" },
+        "adImageUrl": { "type": "string" },
+        "adImageDriveId": { "type": "string" },
+        "ownerName": { "type": "string" },
+        "ownerType": { "type": "string" },
+        "ownerPhone": { "type": "string" },
+        "ownerEmail": { "type": "string" },
+        "address": { "type": "string" },
+        "neighborhood": { "type": "string" },
+        "city": { "type": "string" },
+        "propertyType": { "type": "string" },
+        "status": { "type": "string" },
+        "notes": { "type": "string" },
+        "estimatedPrice": { "type": "string" },
+        "areaSize": { "type": "string" },
+        "photosFolderUrl": { "type": "string" },
+        "photosFolderDriveId": { "type": "string" },
+        "referrerName": { "type": "string" },
+        "referrerContact": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "status", "createdAt", "updatedAt"]
+    },
+    "Client": {
+      "title": "Client",
+      "description": "Interested client lead record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "companyName": { "type": "string" },
+        "interestType": { "type": "string" },
+        "budget": { "type": "string" },
+        "desiredArea": { "type": "string" },
+        "preferredLocations": { "type": "string" },
+        "interestedPropertyIds": { "type": "array" },
+        "attendanceStatus": { "type": "string" },
+        "nextFollowUpDate": { "type": "string" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "name", "phone", "attendanceStatus", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/properties/{propertyId}": {
+      "schema": { "$ref": "#/entities/Property" },
+      "description": "Commercial properties captured by the user"
+    },
+    "/users/{userId}/clients/{clientId}": {
+      "schema": { "$ref": "#/entities/Client" },
+      "description": "Clients and leads registered by the user"
+    }
+  }
+}

@@ -29,6 +29,7 @@ interface HeaderProps {
   onOpenVercelHelp: () => void;
   propertiesCount: number;
   clientsCount: number;
+  isCloudSynced?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -45,6 +46,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenVercelHelp,
   propertiesCount,
   clientsCount,
+  isCloudSynced,
 }) => {
   return (
     <header className="bg-white text-slate-900 border-b border-slate-200 sticky top-0 z-40 shadow-2xs">
@@ -116,7 +118,13 @@ export const Header: React.FC<HeaderProps> = ({
                     {user.displayName || user.email?.split('@')[0]}
                   </p>
                   <p className="text-[10px] text-emerald-700 font-medium flex items-center gap-1">
-                    <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600" /> Conectado ao Google
+                    <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600" />
+                    <span>Conectado</span>
+                    {isCloudSynced && (
+                      <span className="ml-1 px-1.5 py-0.2 bg-blue-100 text-blue-800 rounded font-bold text-[9px]">
+                        ☁️ Nuvem Ativa
+                      </span>
+                    )}
                   </p>
                 </div>
                 <button

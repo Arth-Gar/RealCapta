@@ -37,6 +37,16 @@ import {
   loadSyncedSpreadsheetInfo,
   saveSyncedSpreadsheetInfo,
 } from './services/storage';
+import {
+  validateFirestoreConnection,
+  subscribeUserProperties,
+  subscribeUserClients,
+  savePropertyToFirestore,
+  deletePropertyFromFirestore,
+  saveClientToFirestore,
+  deleteClientFromFirestore,
+  seedInitialFirestoreData,
+} from './services/firestoreService';
 import { Header } from './components/Header';
 import { PropertiesTable } from './components/PropertiesTable';
 import { PropertyModal } from './components/PropertyModal';
@@ -63,6 +73,7 @@ export default function App() {
   const [properties, setProperties] = useState<PropertyListing[]>([]);
   const [clients, setClients] = useState<ClientLead[]>([]);
   const [syncedSheet, setSyncedSheet] = useState<SyncedSpreadsheetInfo | null>(null);
+  const [isCloudSynced, setIsCloudSynced] = useState<boolean>(false);
 
   // Modals
   const [isPropertyModalOpen, setIsPropertyModalOpen] = useState(false);
@@ -128,6 +139,56 @@ export default function App() {
     };
   }, []);
 
+  // Sync with Firestore in real-time when user is authenticated
+  useEffect(() => {
+    if (!user?.uid) {
+      setIsCloudSynced(false);
+      return;
+    }
+
+    validateFirestoreConnection().then((ok) => {
+      if (ok) setIsCloudSynced(true);
+    });
+
+    // Seed local data to Firestore if cloud collection is currently empty
+    seedInitialFirestoreData(user.uid, loadStoredProperties(), loadStoredClients());
+
+    // Real-time properties subscription
+    const unsubProps = subscribeUserProperties(
+      user.uid,
+      (cloudProps) => {
+        if (cloudProps && cloudProps.length > 0) {
+          setProperties(cloudProps);
+          saveStoredProperties(cloudProps);
+        }
+        setIsCloudSynced(true);
+      },
+      (err) => {
+        console.warn('Erro ao sincronizar propriedades do Firestore:', err);
+      }
+    );
+
+    // Real-time clients subscription
+    const unsubClients = subscribeUserClients(
+      user.uid,
+      (cloudClients) => {
+        if (cloudClients && cloudClients.length > 0) {
+          setClients(cloudClients);
+          saveStoredClients(cloudClients);
+        }
+        setIsCloudSynced(true);
+      },
+      (err) => {
+        console.warn('Erro ao sincronizar clientes do Firestore:', err);
+      }
+    );
+
+    return () => {
+      unsubProps();
+      unsubClients();
+    };
+  }, [user]);
+
   const showNotification = (text: string, type: 'success' | 'info' | 'error' = 'success') => {
     setNotification({ text, type });
     setTimeout(() => {
@@ -144,7 +205,7 @@ export default function App() {
       if (result) {
         setUser(result.user);
         showNotification(
-          `Conectado com sucesso como ${result.user.displayName || result.user.email}! Acesso ao Google Drive e Sheets ativado.`
+          `Conectado com sucesso como ${result.user.displayName || result.user.email}! Dados salvos na nuvem do Firebase.`
         );
       }
     } catch (err: unknown) {
@@ -165,6 +226,7 @@ export default function App() {
   const handleSignOut = async () => {
     await logout();
     setUser(null);
+    setIsCloudSynced(false);
     showNotification('Sessão do Google encerrada.', 'info');
   };
 
@@ -177,19 +239,30 @@ export default function App() {
       showNotification('Captação de imóvel atualizada com sucesso!');
     } else {
       updated = [saved, ...properties];
-      showNotification('Nova captação de imóvel cadastrada na planilha!');
+      showNotification('Nova captação de imóvel cadastrada!');
     }
     setProperties(updated);
     saveStoredProperties(updated);
+    if (user?.uid) {
+      savePropertyToFirestore(user.uid, saved).catch(console.error);
+    }
     setEditingProperty(null);
   };
 
   const handleUpdatePropertyStatus = (propertyId: string, newStatus: PropertyStatus) => {
+    const target = properties.find((p) => p.id === propertyId);
     const updated = properties.map((p) =>
       p.id === propertyId ? { ...p, status: newStatus, updatedAt: new Date().toISOString() } : p
     );
     setProperties(updated);
     saveStoredProperties(updated);
+    if (target && user?.uid) {
+      savePropertyToFirestore(user.uid, {
+        ...target,
+        status: newStatus,
+        updatedAt: new Date().toISOString(),
+      }).catch(console.error);
+    }
     showNotification('Status da captação atualizado!');
   };
 
@@ -197,12 +270,15 @@ export default function App() {
     setConfirmDialog({
       isOpen: true,
       title: 'Excluir Captação de Imóvel',
-      message: `Tem certeza que deseja excluir o imóvel em "${property.address}"? Esta operação removerá o registro da triagem local e da planilha.`,
+      message: `Tem certeza que deseja excluir o imóvel em "${property.address}"? Esta operação removerá o registro da triagem local e da nuvem.`,
       confirmText: 'Sim, Excluir',
       onConfirm: () => {
         const updated = properties.filter((p) => p.id !== property.id);
         setProperties(updated);
         saveStoredProperties(updated);
+        if (user?.uid) {
+          deletePropertyFromFirestore(user.uid, property.id).catch(console.error);
+        }
         setConfirmDialog({ ...confirmDialog, isOpen: false });
         showNotification('Captação removida com sucesso.', 'info');
       },
@@ -222,16 +298,27 @@ export default function App() {
     }
     setClients(updated);
     saveStoredClients(updated);
+    if (user?.uid) {
+      saveClientToFirestore(user.uid, saved).catch(console.error);
+    }
     setEditingClient(null);
     setPreSelectedPropertyId(undefined);
   };
 
   const handleUpdateClientStatus = (clientId: string, newStatus: ClientAttendanceStatus) => {
+    const target = clients.find((c) => c.id === clientId);
     const updated = clients.map((c) =>
       c.id === clientId ? { ...c, attendanceStatus: newStatus, updatedAt: new Date().toISOString() } : c
     );
     setClients(updated);
     saveStoredClients(updated);
+    if (target && user?.uid) {
+      saveClientToFirestore(user.uid, {
+        ...target,
+        attendanceStatus: newStatus,
+        updatedAt: new Date().toISOString(),
+      }).catch(console.error);
+    }
     showNotification('Status do atendimento atualizado!');
   };
 
@@ -245,6 +332,9 @@ export default function App() {
         const updated = clients.filter((c) => c.id !== client.id);
         setClients(updated);
         saveStoredClients(updated);
+        if (user?.uid) {
+          deleteClientFromFirestore(user.uid, client.id).catch(console.error);
+        }
         setConfirmDialog({ ...confirmDialog, isOpen: false });
         showNotification('Cliente removido.', 'info');
       },
@@ -321,6 +411,7 @@ export default function App() {
         onOpenVercelHelp={() => setIsVercelHelpOpen(true)}
         propertiesCount={properties.length}
         clientsCount={clients.length}
+        isCloudSynced={isCloudSynced}
       />
 
       {/* Auth Error Banner with Quick Fix Action */}

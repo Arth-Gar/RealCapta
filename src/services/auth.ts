@@ -9,6 +9,7 @@ import {
   User,
   signOut,
 } from 'firebase/auth';
+import { getFirestore } from 'firebase/firestore';
 import rawConfig from '../../firebase-applet-config.json';
 
 export const SCOPES = [
@@ -22,6 +23,7 @@ export const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || rawConfig.apiKey,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || rawConfig.authDomain,
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || rawConfig.projectId,
+  firestoreDatabaseId: import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || rawConfig.firestoreDatabaseId,
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || rawConfig.storageBucket,
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || rawConfig.messagingSenderId,
   appId: import.meta.env.VITE_FIREBASE_APP_ID || rawConfig.appId,
@@ -30,6 +32,9 @@ export const firebaseConfig = {
 
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
+export const db = firebaseConfig.firestoreDatabaseId
+  ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
+  : getFirestore(app);
 
 const provider = new GoogleAuthProvider();
 SCOPES.forEach((scope) => provider.addScope(scope));

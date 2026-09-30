@@ -27,6 +27,7 @@ import {
   googleSignIn,
   logout,
   getAccessToken,
+  parseAuthError,
 } from './services/auth';
 import {
   loadStoredProperties,
@@ -45,6 +46,7 @@ import { KanbanBoard } from './components/KanbanBoard';
 import { WhatsAppModal } from './components/WhatsAppModal';
 import { SheetsSyncModal } from './components/SheetsSyncModal';
 import { ConfirmationDialog } from './components/ConfirmationDialog';
+import { VercelHelpModal } from './components/VercelHelpModal';
 
 export default function App() {
   // Navigation
@@ -54,6 +56,8 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [isVercelHelpOpen, setIsVercelHelpOpen] = useState(false);
+  const [vercelHelpError, setVercelHelpError] = useState<string | null>(null);
 
   // Data State
   const [properties, setProperties] = useState<PropertyListing[]>([]);
@@ -145,9 +149,14 @@ export default function App() {
       }
     } catch (err: unknown) {
       console.error('Erro no login:', err);
-      const msg = err instanceof Error ? err.message : 'Falha na autenticação com Google';
-      setAuthError(msg);
-      showNotification(msg, 'error');
+      const parsed = parseAuthError(err);
+      setAuthError(parsed.message);
+      if (parsed.isUnauthorizedDomain) {
+        setVercelHelpError(parsed.message);
+        setIsVercelHelpOpen(true);
+      } else {
+        showNotification(parsed.message, 'error');
+      }
     } finally {
       setIsAuthenticating(false);
     }
@@ -309,9 +318,40 @@ export default function App() {
           setPreSelectedPropertyId(undefined);
           setIsClientModalOpen(true);
         }}
+        onOpenVercelHelp={() => setIsVercelHelpOpen(true)}
         propertiesCount={properties.length}
         clientsCount={clients.length}
       />
+
+      {/* Auth Error Banner with Quick Fix Action */}
+      {authError && !user && (
+        <div className="bg-amber-500/10 border-b border-amber-500/30 px-4 py-2.5 text-xs text-amber-900 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+            <span className="font-medium">{authError}</span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                setVercelHelpError(authError);
+                setIsVercelHelpOpen(true);
+              }}
+              className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded text-xs transition-colors shadow-2xs"
+            >
+              Como Resolver na Vercel / Firebase
+            </button>
+            <button
+              type="button"
+              onClick={() => setAuthError(null)}
+              className="p-1 text-amber-700 hover:text-amber-900 font-bold"
+              title="Fechar"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Notification Toast */}
       {notification && (
@@ -603,6 +643,14 @@ export default function App() {
         confirmText={confirmDialog.confirmText}
         onConfirm={confirmDialog.onConfirm}
         onCancel={() => setConfirmDialog({ ...confirmDialog, isOpen: false })}
+      />
+
+      {/* Vercel & Firebase Setup Guide Modal */}
+      <VercelHelpModal
+        isOpen={isVercelHelpOpen}
+        onClose={() => setIsVercelHelpOpen(false)}
+        onRetrySignIn={handleSignIn}
+        initialError={vercelHelpError}
       />
     </div>
   );

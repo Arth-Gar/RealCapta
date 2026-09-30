@@ -10,6 +10,7 @@ import {
   Sparkles,
   RefreshCw,
   Plus,
+  HelpCircle,
 } from 'lucide-react';
 import { User } from 'firebase/auth';
 import { SyncedSpreadsheetInfo } from '../types';
@@ -25,6 +26,7 @@ interface HeaderProps {
   onOpenSyncModal: () => void;
   onOpenNewProperty: () => void;
   onOpenNewClient: () => void;
+  onOpenVercelHelp: () => void;
   propertiesCount: number;
   clientsCount: number;
 }
@@ -40,6 +42,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenSyncModal,
   onOpenNewProperty,
   onOpenNewClient,
+  onOpenVercelHelp,
   propertiesCount,
   clientsCount,
 }) => {
@@ -153,6 +156,17 @@ export const Header: React.FC<HeaderProps> = ({
                 <span>{isAuthenticating ? 'Conectando...' : 'Conectar Google'}</span>
               </button>
             )}
+
+            {/* Vercel & Firebase Help Button */}
+            <button
+              type="button"
+              onClick={onOpenVercelHelp}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200/80 text-slate-700 text-xs font-medium rounded-lg border border-slate-200 transition-colors shadow-2xs"
+              title="Como configurar e resolver o login do Google/Firebase no Vercel"
+            >
+              <HelpCircle className="w-3.5 h-3.5 text-blue-600" />
+              <span className="hidden sm:inline">Ajuda Vercel</span>
+            </button>
           </div>
         </div>
 

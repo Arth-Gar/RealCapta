@@ -68,7 +68,8 @@ export const PropertyModal: React.FC<PropertyModalProps> = ({
   );
 
   // Device Upload & Metadata Extraction State
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   const multiplePhotosInputRef = useRef<HTMLInputElement>(null);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -332,23 +333,33 @@ export const PropertyModal: React.FC<PropertyModalProps> = ({
                   </h4>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  {/* Hidden file input supporting camera or file picker */}
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Hidden file input for Photo Gallery / Albums / Files (NO capture attribute) */}
                   <input
                     type="file"
-                    ref={fileInputRef}
+                    ref={galleryInputRef}
+                    accept="image/*"
+                    onChange={handleFileInputChange}
+                    className="hidden"
+                  />
+
+                  {/* Hidden file input for direct Camera capture */}
+                  <input
+                    type="file"
+                    ref={cameraInputRef}
                     accept="image/*"
                     capture="environment"
                     onChange={handleFileInputChange}
                     className="hidden"
                   />
 
-                  {/* Device upload button */}
+                  {/* Gallery upload button */}
                   <button
                     type="button"
-                    onClick={() => fileInputRef.current?.click()}
+                    onClick={() => galleryInputRef.current?.click()}
                     disabled={isUploadingPhoto}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-md shadow-xs transition-colors"
+                    title="Navegar e escolher uma foto da galeria do seu aparelho"
                   >
                     {isUploadingPhoto ? (
                       <>
@@ -358,9 +369,21 @@ export const PropertyModal: React.FC<PropertyModalProps> = ({
                     ) : (
                       <>
                         <Upload className="w-3.5 h-3.5" />
-                        <span>📸 Upload do Aparelho / Câmera</span>
+                        <span>Galeria do Aparelho</span>
                       </>
                     )}
+                  </button>
+
+                  {/* Camera button */}
+                  <button
+                    type="button"
+                    onClick={() => cameraInputRef.current?.click()}
+                    disabled={isUploadingPhoto}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 text-xs font-semibold rounded-md shadow-2xs transition-colors"
+                    title="Abrir a câmera diretamente para tirar uma nova foto agora"
+                  >
+                    <Camera className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Tirar Foto</span>
                   </button>
 
                   {/* Drive browser button */}
@@ -378,7 +401,7 @@ export const PropertyModal: React.FC<PropertyModalProps> = ({
               {/* Upload & Dropzone Helper */}
               <div className="text-[11px] text-slate-500 flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/70 pb-2">
                 <span>
-                  💡 Tire uma foto com seu celular ou envie da galeria/computador. Extraímos data, modelo do aparelho e GPS automaticamente!
+                  💡 Escolha uma foto salva na galeria do seu aparelho, tire uma foto nova com a câmera ou arraste uma imagem aqui. Extraímos data, modelo do aparelho e localização GPS automaticamente!
                 </span>
                 <label className="inline-flex items-center gap-1.5 cursor-pointer text-blue-700 font-medium select-none">
                   <input

@@ -20,11 +20,19 @@ import {
   CheckCircle2,
   Check,
   Plus,
+  Flame,
+  Images,
+  Maximize2,
+  Star,
 } from 'lucide-react';
-import { PropertyListing, PropertyStatus } from '../types';
+import { PropertyListing, PropertyStatus, PropertyPhotoItem } from '../types';
 import { DriveBrowserModal } from './DriveBrowserModal';
 import { extractImageMetadata, ExtractedImageMeta } from '../services/imageMetaService';
-import { uploadFileToDrive } from '../services/driveService';
+import {
+  uploadPropertyImage,
+  ImageUploadDestination,
+  getDisplayImageUrl,
+} from '../services/imageStorageService';
 
 interface PropertyModalProps {
   isOpen: boolean;
@@ -46,6 +54,9 @@ export const PropertyModal: React.FC<PropertyModalProps> = ({
   const [formData, setFormData] = useState<Partial<PropertyListing>>({
     adImageName: '',
     adImageUrl: '',
+    adImageDriveId: undefined,
+    adImageStoragePath: undefined,
+    adImageStorageProvider: 'both',
     ownerName: '',
     ownerType: 'PROPRIETARIO',
     ownerPhone: '',
@@ -59,6 +70,8 @@ export const PropertyModal: React.FC<PropertyModalProps> = ({
     estimatedPrice: '',
     areaSize: '',
     photosFolderUrl: '',
+    photosFolderDriveId: undefined,
+    photosList: [],
     referrerName: '',
     referrerContact: '',
   });
@@ -67,28 +80,43 @@ export const PropertyModal: React.FC<PropertyModalProps> = ({
     null
   );
 
+  // Preferred upload destination: BOTH (recommended), FIREBASE, or DRIVE
+  const [uploadDestination, setUploadDestination] = useState<ImageUploadDestination>('BOTH');
+
   // Device Upload & Metadata Extraction State
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const multiplePhotosInputRef = useRef<HTMLInputElement>(null);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const [uploadSuccessMsg, setUploadSuccessMsg] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [extractedMeta, setExtractedMeta] = useState<ExtractedImageMeta | null>(null);
   const [autoTransferMeta, setAutoTransferMeta] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
-  
+
   // Section 5 multiple upload state
   const [isUploadingMultiple, setIsUploadingMultiple] = useState(false);
   const [multipleUploadStatus, setMultipleUploadStatus] = useState<string | null>(null);
 
+  // Lightbox preview within modal
+  const [previewPhoto, setPreviewPhoto] = useState<{ url: string; name: string } | null>(null);
+
   useEffect(() => {
     if (propertyToEdit) {
-      setFormData({ ...propertyToEdit });
+      setFormData({
+        ...propertyToEdit,
+        photosList: propertyToEdit.photosList || [],
+      });
       setExtractedMeta(null);
+      setUploadSuccessMsg(null);
+      setUploadError(null);
     } else {
       setFormData({
         adImageName: '',
         adImageUrl: '',
+        adImageDriveId: undefined,
+        adImageStoragePath: undefined,
+        adImageStorageProvider: 'both',
         ownerName: '',
         ownerType: 'PROPRIETARIO',
         ownerPhone: '',
@@ -102,10 +130,14 @@ export const PropertyModal: React.FC<PropertyModalProps> = ({
         estimatedPrice: '',
         areaSize: '',
         photosFolderUrl: '',
+        photosFolderDriveId: undefined,
+        photosList: [],
         referrerName: '',
         referrerContact: '',
       });
       setExtractedMeta(null);
+      setUploadSuccessMsg(null);
+      setUploadError(null);
     }
   }, [propertyToEdit, isOpen]);
 
@@ -116,6 +148,7 @@ export const PropertyModal: React.FC<PropertyModalProps> = ({
     if (!file) return;
     setIsUploadingPhoto(true);
     setUploadError(null);
+    setUploadSuccessMsg(null);
 
     try {
       // 1. Extract EXIF / Meta-tags (date, camera/phone, GPS, resolution)
@@ -139,25 +172,31 @@ export const PropertyModal: React.FC<PropertyModalProps> = ({
         });
       }
 
-      // 3. Local object URL preview immediately
-      const localUrl = URL.createObjectURL(file);
+      // 3. Upload to Google Drive, Firebase Storage, or Both based on preference
+      const result = await uploadPropertyImage(file, uploadDestination, {
+        propertyId: propertyToEdit?.id,
+        parentDriveFolderId: formData.photosFolderDriveId,
+        isDriveAuthenticated: isAuthenticated,
+      });
+
       setFormData((prev) => ({
         ...prev,
-        adImageName: file.name,
-        adImageUrl: localUrl,
+        adImageName: result.name,
+        adImageUrl: result.url,
+        adImageDriveId: result.driveId,
+        adImageStoragePath: result.storagePath,
+        adImageStorageProvider: result.provider,
       }));
 
-      // 4. Upload to Google Drive if authenticated
-      if (isAuthenticated) {
-        const driveItem = await uploadFileToDrive(file, formData.photosFolderDriveId);
-        setFormData((prev) => ({
-          ...prev,
-          adImageName: driveItem.name,
-          adImageUrl:
-            driveItem.webViewLink || `https://drive.google.com/file/d/${driveItem.id}/view`,
-          adImageDriveId: driveItem.id,
-        }));
+      // Feedback message
+      if (result.provider === 'both') {
+        setUploadSuccessMsg('✓ Foto enviada com sucesso para o Google Drive e para o Firebase!');
+      } else if (result.provider === 'firebase') {
+        setUploadSuccessMsg('✓ Foto salva com sucesso no Firebase Cloud Storage!');
+      } else {
+        setUploadSuccessMsg('✓ Foto salva com sucesso no seu Google Drive!');
       }
+      setTimeout(() => setUploadSuccessMsg(null), 5000);
     } catch (err: unknown) {
       console.error('Erro ao processar imagem:', err);
       setUploadError(err instanceof Error ? err.message : 'Erro ao processar a foto do aparelho');
@@ -211,41 +250,90 @@ export const PropertyModal: React.FC<PropertyModalProps> = ({
     if (extractedMeta?.googleMapsUrl) {
       setFormData((prev) => ({
         ...prev,
-        address: prev.address && prev.address !== 'Sem endereço informado'
-          ? `${prev.address} (GPS: ${extractedMeta.latitude?.toFixed(5)}, ${extractedMeta.longitude?.toFixed(5)})`
-          : `Localização GPS: ${extractedMeta.latitude?.toFixed(6)}, ${extractedMeta.longitude?.toFixed(6)}`,
+        address:
+          prev.address && prev.address !== 'Sem endereço informado'
+            ? `${prev.address} (GPS: ${extractedMeta.latitude?.toFixed(5)}, ${extractedMeta.longitude?.toFixed(5)})`
+            : `Localização GPS: ${extractedMeta.latitude?.toFixed(6)}, ${extractedMeta.longitude?.toFixed(6)}`,
       }));
     }
   };
 
-  // Multiple photos upload for Section 5
+  // Multiple photos upload for Section 5 (Gallery)
   const handleMultiplePhotosUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
-    if (!isAuthenticated) {
-      onRequireAuth();
-      return;
-    }
 
     const files = Array.from(e.target.files) as File[];
     setIsUploadingMultiple(true);
-    setMultipleUploadStatus(`Enviando 0 de ${files.length} fotos para o Drive...`);
+    setMultipleUploadStatus(`Enviando 0 de ${files.length} fotos...`);
 
     try {
       let count = 0;
+      const newPhotoItems: PropertyPhotoItem[] = [];
+
       for (const file of files) {
-        await uploadFileToDrive(file, formData.photosFolderDriveId);
+        const result = await uploadPropertyImage(file, uploadDestination, {
+          propertyId: propertyToEdit?.id,
+          parentDriveFolderId: formData.photosFolderDriveId,
+          isDriveAuthenticated: isAuthenticated,
+        });
+
+        newPhotoItems.push({
+          id: `photo-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+          name: file.name,
+          url: result.url,
+          driveId: result.driveId,
+          storagePath: result.storagePath,
+          provider: result.provider,
+          createdAt: new Date().toISOString(),
+        });
+
         count++;
-        setMultipleUploadStatus(`Enviando ${count} de ${files.length} fotos para o Drive...`);
+        setMultipleUploadStatus(`Enviando ${count} de ${files.length} fotos (${uploadDestination === 'BOTH' ? 'Drive + Firebase' : uploadDestination})...`);
       }
-      setMultipleUploadStatus(`${count} fotos enviadas com sucesso para o Drive!`);
+
+      setFormData((prev) => {
+        const currentList = prev.photosList || [];
+        const updatedList = [...currentList, ...newPhotoItems];
+        return {
+          ...prev,
+          photosList: updatedList,
+          photosCount: updatedList.length,
+        };
+      });
+
+      setMultipleUploadStatus(`✓ ${count} fotos enviadas com sucesso!`);
       setTimeout(() => setMultipleUploadStatus(null), 4000);
     } catch (err: unknown) {
       setMultipleUploadStatus(
-        err instanceof Error ? err.message : 'Erro ao enviar fotos para o Google Drive'
+        err instanceof Error ? err.message : 'Erro ao enviar fotos'
       );
     } finally {
       setIsUploadingMultiple(false);
     }
+  };
+
+  // Remove a photo from gallery
+  const handleRemoveGalleryPhoto = (photoId: string) => {
+    setFormData((prev) => {
+      const updatedList = (prev.photosList || []).filter((p) => p.id !== photoId);
+      return {
+        ...prev,
+        photosList: updatedList,
+        photosCount: updatedList.length,
+      };
+    });
+  };
+
+  // Set gallery photo as main ad image
+  const handleSetAsMainPhoto = (photo: PropertyPhotoItem) => {
+    setFormData((prev) => ({
+      ...prev,
+      adImageName: photo.name,
+      adImageUrl: photo.url,
+      adImageDriveId: photo.driveId,
+      adImageStoragePath: photo.storagePath,
+      adImageStorageProvider: photo.provider === 'local' ? 'firebase' : photo.provider,
+    }));
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -258,6 +346,8 @@ export const PropertyModal: React.FC<PropertyModalProps> = ({
       adImageName: formData.adImageName?.trim() || 'Foto da Placa',
       adImageUrl: formData.adImageUrl?.trim() || '',
       adImageDriveId: formData.adImageDriveId,
+      adImageStoragePath: formData.adImageStoragePath,
+      adImageStorageProvider: formData.adImageStorageProvider || 'both',
       ownerName: formData.ownerName?.trim() || 'Sem nome informado',
       ownerType: formData.ownerType || 'PROPRIETARIO',
       ownerPhone: formData.ownerPhone?.trim() || '',
@@ -272,6 +362,8 @@ export const PropertyModal: React.FC<PropertyModalProps> = ({
       areaSize: formData.areaSize?.trim() || '',
       photosFolderUrl: formData.photosFolderUrl?.trim() || '',
       photosFolderDriveId: formData.photosFolderDriveId,
+      photosCount: formData.photosList?.length || formData.photosCount || 0,
+      photosList: formData.photosList || [],
       referrerName: formData.referrerName?.trim() || '',
       referrerContact: formData.referrerContact?.trim() || '',
       createdAt: propertyToEdit?.createdAt || now,
@@ -281,6 +373,8 @@ export const PropertyModal: React.FC<PropertyModalProps> = ({
     onSave(finalProperty);
     onClose();
   };
+
+  const mainDisplayUrl = getDisplayImageUrl(formData.adImageUrl, formData.adImageDriveId);
 
   return (
     <>
@@ -300,29 +394,29 @@ export const PropertyModal: React.FC<PropertyModalProps> = ({
                   {propertyToEdit ? 'Editar Captação de Imóvel' : 'Nova Captação de Imóvel Comercial'}
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Upload direto do aparelho com leitura automática de metadados EXIF/GPS
+                  Cadastre dados da placa, contatos, fotos no Google Drive e Firebase (campos opcionais)
                 </p>
               </div>
             </div>
             <button
               onClick={onClose}
-              className="p-1 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-200 transition-colors"
+              className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded-lg transition-colors"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
 
-          {/* Form Body */}
-          <form onSubmit={handleSubmit} className="p-5 sm:p-6 overflow-y-auto flex-1 space-y-4">
-            {/* Section 1: Foto do Anúncio / Placa com Upload do Aparelho */}
+          {/* Form Content */}
+          <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-6">
+            {/* Section 1: Imagem do Anúncio / Placa (Drive & Firebase) */}
             <div
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
               onDrop={handleDrop}
               className={`p-4 rounded-xl border transition-all space-y-3 ${
                 isDragging
-                  ? 'bg-blue-50/90 border-blue-500 ring-2 ring-blue-300'
-                  : 'bg-slate-50/80 border-slate-200'
+                  ? 'bg-blue-100/70 border-blue-500 ring-2 ring-blue-300'
+                  : 'bg-blue-50/50 border-blue-200'
               }`}
             >
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -334,7 +428,7 @@ export const PropertyModal: React.FC<PropertyModalProps> = ({
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
-                  {/* Hidden file input for Photo Gallery / Albums / Files (NO capture attribute) */}
+                  {/* Hidden file input for Photo Gallery (NO capture attribute) */}
                   <input
                     type="file"
                     ref={galleryInputRef}
@@ -364,7 +458,7 @@ export const PropertyModal: React.FC<PropertyModalProps> = ({
                     {isUploadingPhoto ? (
                       <>
                         <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        <span>Processando Foto...</span>
+                        <span>Enviando Foto...</span>
                       </>
                     ) : (
                       <>
@@ -398,12 +492,53 @@ export const PropertyModal: React.FC<PropertyModalProps> = ({
                 </div>
               </div>
 
-              {/* Upload & Dropzone Helper */}
-              <div className="text-[11px] text-slate-500 flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/70 pb-2">
-                <span>
-                  💡 Escolha uma foto salva na galeria do seu aparelho, tire uma foto nova com a câmera ou arraste uma imagem aqui. Extraímos data, modelo do aparelho e localização GPS automaticamente!
-                </span>
-                <label className="inline-flex items-center gap-1.5 cursor-pointer text-blue-700 font-medium select-none">
+              {/* Destination selector: BOTH, FIREBASE, or DRIVE */}
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-blue-200/60">
+                <div className="flex items-center gap-1.5 text-xs">
+                  <span className="font-semibold text-slate-700">Onde salvar as imagens:</span>
+                  <div className="inline-flex rounded-lg border border-slate-300 p-0.5 bg-slate-100/90 shadow-2xs">
+                    <button
+                      type="button"
+                      onClick={() => setUploadDestination('BOTH')}
+                      className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all inline-flex items-center gap-1 ${
+                        uploadDestination === 'BOTH'
+                          ? 'bg-blue-600 text-white shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                      title="Salva no Google Drive pessoal e também no Firebase Cloud Storage"
+                    >
+                      <span>⚡ Ambos (Drive + Firebase)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setUploadDestination('FIREBASE')}
+                      className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all inline-flex items-center gap-1 ${
+                        uploadDestination === 'FIREBASE'
+                          ? 'bg-orange-600 text-white shadow-xs font-semibold'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                      title="Salva na nuvem do Firebase (acesso rápido e seguro)"
+                    >
+                      <Flame className="w-3 h-3" />
+                      <span>Firebase Storage</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setUploadDestination('DRIVE')}
+                      className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all inline-flex items-center gap-1 ${
+                        uploadDestination === 'DRIVE'
+                          ? 'bg-emerald-600 text-white shadow-xs font-semibold'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                      title="Salva diretamente no seu Google Drive"
+                    >
+                      <HardDrive className="w-3 h-3" />
+                      <span>Google Drive</span>
+                    </button>
+                  </div>
+                </div>
+
+                <label className="inline-flex items-center gap-1.5 cursor-pointer text-blue-700 text-xs font-medium select-none">
                   <input
                     type="checkbox"
                     checked={autoTransferMeta}
@@ -414,15 +549,22 @@ export const PropertyModal: React.FC<PropertyModalProps> = ({
                 </label>
               </div>
 
+              {uploadSuccessMsg && (
+                <div className="p-2 bg-emerald-50 text-emerald-800 text-xs rounded-lg border border-emerald-200 flex items-center gap-1.5 font-medium">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span>{uploadSuccessMsg}</span>
+                </div>
+              )}
+
               {uploadError && (
-                <div className="p-2.5 bg-red-50 text-red-700 text-xs rounded-lg border border-red-200">
+                <div className="p-2 bg-red-50 text-red-700 text-xs rounded-lg border border-red-200">
                   {uploadError}
                 </div>
               )}
 
               {/* Extracted Metadata Card */}
               {extractedMeta && (
-                <div className="p-3 bg-blue-50/60 border border-blue-200 rounded-lg text-xs space-y-1.5 animate-fade-in">
+                <div className="p-3 bg-white border border-blue-200 rounded-lg text-xs space-y-1.5 shadow-2xs">
                   <div className="flex items-center justify-between">
                     <span className="font-bold text-blue-900 flex items-center gap-1.5">
                       <Sparkles className="w-3.5 h-3.5 text-blue-600" />
@@ -498,44 +640,82 @@ export const PropertyModal: React.FC<PropertyModalProps> = ({
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1">
-                    Link da Imagem (Google Drive / Web)
+                    Link da Imagem (Google Drive / Firebase)
                   </label>
                   <input
                     type="text"
                     value={formData.adImageUrl || ''}
                     onChange={(e) => setFormData({ ...formData, adImageUrl: e.target.value })}
-                    placeholder="https://drive.google.com/file/d/..."
-                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                    placeholder="https://drive.google.com/file/d/... ou https://firebasestorage..."
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white font-mono text-[11px]"
                   />
                 </div>
               </div>
 
               {formData.adImageUrl && (
-                <div className="flex items-center justify-between gap-3 pt-1 p-2 bg-white rounded-lg border border-slate-200">
+                <div className="flex items-center justify-between gap-3 pt-1 p-2 bg-white rounded-lg border border-slate-200 shadow-2xs">
                   <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 bg-slate-100 rounded-lg overflow-hidden shrink-0 border border-slate-300 flex items-center justify-center">
+                    <div
+                      onClick={() =>
+                        setPreviewPhoto({
+                          url: mainDisplayUrl || formData.adImageUrl || '',
+                          name: formData.adImageName || 'Foto da Placa',
+                        })
+                      }
+                      className="w-14 h-14 bg-slate-100 rounded-lg overflow-hidden shrink-0 border border-slate-300 flex items-center justify-center cursor-pointer group relative"
+                      title="Clique para ampliar"
+                    >
                       <img
-                        src={formData.adImageUrl}
+                        src={mainDisplayUrl || formData.adImageUrl}
                         alt="Prévia da Placa"
                         className="w-full h-full object-cover"
                         referrerPolicy="no-referrer"
-                        onError={(e) => {
-                          (e.target as HTMLElement).style.display = 'none';
-                        }}
                       />
+                      <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white">
+                        <Maximize2 className="w-3.5 h-3.5" />
+                      </div>
                     </div>
                     <div className="text-xs text-slate-600">
-                      <span className="font-medium text-slate-800 block truncate max-w-xs">
-                        {formData.adImageName || 'Foto vinculada'}
-                      </span>
-                      <a
-                        href={formData.adImageUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-blue-600 hover:underline inline-flex items-center gap-1 mt-0.5"
-                      >
-                        Abrir foto original <ExternalLink className="w-3 h-3" />
-                      </a>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-semibold text-slate-800 block truncate max-w-xs">
+                          {formData.adImageName || 'Foto da placa'}
+                        </span>
+                        {formData.adImageStorageProvider === 'both' ? (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800">
+                            ⚡ Drive + Firebase
+                          </span>
+                        ) : formData.adImageStorageProvider === 'firebase' ? (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-800">
+                            🔥 Firebase
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                            📁 Google Drive
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 mt-1">
+                        <a
+                          href={formData.adImageUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-blue-600 hover:underline inline-flex items-center gap-1 text-[11px]"
+                        >
+                          Ver original <ExternalLink className="w-3 h-3" />
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setPreviewPhoto({
+                              url: mainDisplayUrl || formData.adImageUrl || '',
+                              name: formData.adImageName || 'Foto da Placa',
+                            })
+                          }
+                          className="text-slate-600 hover:text-slate-900 inline-flex items-center gap-1 text-[11px]"
+                        >
+                          Ampliar
+                        </button>
+                      </div>
                     </div>
                   </div>
                   <button
@@ -546,6 +726,7 @@ export const PropertyModal: React.FC<PropertyModalProps> = ({
                         adImageUrl: '',
                         adImageName: '',
                         adImageDriveId: undefined,
+                        adImageStoragePath: undefined,
                       })
                     }
                     className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
@@ -606,38 +787,65 @@ export const PropertyModal: React.FC<PropertyModalProps> = ({
                     type="text"
                     value={formData.ownerPhone || ''}
                     onChange={(e) => setFormData({ ...formData, ownerPhone: e.target.value })}
-                    placeholder="(11) 98765-4321"
+                    placeholder="Ex: (11) 98765-4321"
                     className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
                   />
                 </div>
               </div>
             </div>
 
-            {/* Section 3: Endereço & Características */}
+            {/* Section 3: Dados de Localização do Imóvel */}
             <div className="p-4 bg-slate-50/80 rounded-xl border border-slate-200 space-y-3">
               <div className="flex items-center gap-2">
                 <MapPin className="w-4 h-4 text-rose-600" />
                 <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                  3. Endereço e Dados do Imóvel Comercial
+                  3. Localização do Imóvel Comercial
                 </h4>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="sm:col-span-2">
                   <label className="block text-xs font-semibold text-slate-600 mb-1">
-                    Endereço Completo (Rua, Número, Bairro, Cidade)
+                    Endereço Completo
                   </label>
                   <input
                     type="text"
                     value={formData.address || ''}
                     onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                    placeholder="Ex: Av. Paulista, 1420 - Bela Vista, São Paulo/SP"
+                    placeholder="Ex: Av. Paulista, 1420 - Bela Vista"
                     className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
                   />
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1">
-                    Tipo do Imóvel Comercial
+                    Bairro
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.neighborhood || ''}
+                    onChange={(e) => setFormData({ ...formData, neighborhood: e.target.value })}
+                    placeholder="Ex: Bela Vista"
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">
+                    Cidade
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.city || ''}
+                    onChange={(e) => setFormData({ ...formData, city: e.target.value })}
+                    placeholder="Ex: São Paulo"
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">
+                    Tipo de Imóvel Comercial
                   </label>
                   <select
                     value={formData.propertyType}
@@ -649,17 +857,14 @@ export const PropertyModal: React.FC<PropertyModalProps> = ({
                     }
                     className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
                   >
-                    <option value="LOJA">Loja Comercial de Rua</option>
-                    <option value="SALA_COMERCIAL">Conjunto / Sala Comercial</option>
-                    <option value="GALPAO">Galpão Logístico / Industrial</option>
+                    <option value="LOJA">Loja Comercial</option>
+                    <option value="SALA_COMERCIAL">Sala / Conjunto Comercial</option>
+                    <option value="GALPAO">Galpão / Depósito Logístico</option>
                     <option value="PREDIO_INTEIRO">Prédio Inteiro / Monousuário</option>
-                    <option value="TERRENO_COMERCIAL">Terreno Comercial / BTS</option>
-                    <option value="OUTRO">Outro Imóvel Comercial</option>
+                    <option value="TERRENO_COMERCIAL">Terreno Comercial</option>
+                    <option value="OUTRO">Outro Comercial</option>
                   </select>
                 </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1">
                     Área Estimada (m²)
@@ -669,54 +874,64 @@ export const PropertyModal: React.FC<PropertyModalProps> = ({
                     value={formData.areaSize || ''}
                     onChange={(e) => setFormData({ ...formData, areaSize: e.target.value })}
                     placeholder="Ex: 220"
-                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
-                  />
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">
-                    Valores Pretendidos (Locação / Venda)
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.estimatedPrice || ''}
-                    onChange={(e) => setFormData({ ...formData, estimatedPrice: e.target.value })}
-                    placeholder="Ex: Aluguel: R$ 18.000/mês ou Venda: R$ 3.2M"
-                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
                   />
                 </div>
               </div>
             </div>
 
-            {/* Section 4: Status da Captação & Observações */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div>
-                <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1">
-                  Status da Captação (Triagem)
-                </label>
-                <select
-                  value={formData.status}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      status: e.target.value as PropertyStatus,
-                    })
-                  }
-                  className="w-full px-3 py-2 text-xs font-semibold border border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-blue-50/50 text-blue-900"
-                >
-                  <option value="NOVO_ANUNCIO">1. Novo Anúncio (Placa / Telefone)</option>
-                  <option value="CONTATO_REALIZADO">2. Contato Realizado</option>
-                  <option value="EM_TRIAGEM">3. Em Triagem de Dados</option>
-                  <option value="NEGOCIACAO_PARCERIA">4. Negociação de Parceria</option>
-                  <option value="CAPTACAO_AUTORIZADA">5. Captação Autorizada</option>
-                  <option value="FOTOS_REALIZADAS">6. Fotos Realizadas</option>
-                  <option value="EM_DIVULGACAO">7. Em Divulgação Ativa</option>
-                  <option value="CONCLUIDO">8. Negócio Concluído</option>
-                  <option value="ARQUIVADO">9. Arquivado / Sem Acordo</option>
-                </select>
+            {/* Section 4: Triagem & Condições Comerciais */}
+            <div className="p-4 bg-slate-50/80 rounded-xl border border-slate-200 space-y-3">
+              <div className="flex items-center gap-2">
+                <Building className="w-4 h-4 text-purple-600" />
+                <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                  4. Triagem e Valores Comerciais
+                </h4>
               </div>
-              <div className="sm:col-span-2">
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">
+                    Status Atual da Captação
+                  </label>
+                  <select
+                    value={formData.status}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        status: e.target.value as PropertyStatus,
+                      })
+                    }
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white font-medium"
+                  >
+                    <option value="NOVO_ANUNCIO">Novo Anúncio (Placa Identificada)</option>
+                    <option value="CONTATO_REALIZADO">Contato Realizado</option>
+                    <option value="EM_TRIAGEM">Em Triagem</option>
+                    <option value="NEGOCIACAO_PARCERIA">Negociação de Parceria</option>
+                    <option value="CAPTACAO_AUTORIZADA">Captação Autorizada</option>
+                    <option value="FOTOS_REALIZADAS">Fotos Realizadas</option>
+                    <option value="EM_DIVULGACAO">Em Divulgação</option>
+                    <option value="CONCLUIDO">Concluído</option>
+                    <option value="ARQUIVADO">Arquivado / Descartado</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">
+                    Valor Pretendido (Locação / Venda)
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.estimatedPrice || ''}
+                    onChange={(e) => setFormData({ ...formData, estimatedPrice: e.target.value })}
+                    placeholder="Ex: Aluguel R$ 18.000 ou Venda R$ 3.2M"
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                  />
+                </div>
+              </div>
+
+              <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider">
+                  <label className="block text-xs font-semibold text-slate-600">
                     Observações Comerciais & Metadados
                   </label>
                   {extractedMeta && (
@@ -735,17 +950,17 @@ export const PropertyModal: React.FC<PropertyModalProps> = ({
               </div>
             </div>
 
-            {/* Section 5: Link da Pasta das Fotos no Google Drive & Upload em Lote */}
+            {/* Section 5: Galeria de Fotos & Pasta do Google Drive / Firebase */}
             <div className="p-4 bg-amber-50/60 rounded-xl border border-amber-200 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
-                  <Folder className="w-4 h-4 text-amber-700" />
+                  <Images className="w-4 h-4 text-amber-700" />
                   <h4 className="text-xs font-bold text-amber-900 uppercase tracking-wider">
-                    5. Pasta das Imagens do Imóvel (Google Drive)
+                    5. Galeria de Imagens do Imóvel & Pasta do Drive
                   </h4>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   {/* Hidden multiple file upload input */}
                   <input
                     type="file"
@@ -781,7 +996,7 @@ export const PropertyModal: React.FC<PropertyModalProps> = ({
                     className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold rounded-md shadow-xs transition-colors"
                   >
                     <FolderPlus className="w-3.5 h-3.5" />
-                    Navegar / Escolher Pasta no Drive
+                    Vincular Pasta no Drive
                   </button>
                 </div>
               </div>
@@ -792,9 +1007,106 @@ export const PropertyModal: React.FC<PropertyModalProps> = ({
                 </div>
               )}
 
+              {/* Uploaded Gallery Photos Grid */}
+              {formData.photosList && formData.photosList.length > 0 && (
+                <div className="space-y-2 pt-1 border-t border-amber-200">
+                  <div className="flex items-center justify-between text-xs text-amber-900 font-semibold">
+                    <span>Fotos salvas nesta captação ({formData.photosList.length}):</span>
+                    <span className="text-[11px] text-amber-700 font-normal">
+                      Clique em uma foto para ampliar ou torná-la a foto principal
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                    {formData.photosList.map((photo) => {
+                      const displayUrl = getDisplayImageUrl(photo.url, photo.driveId);
+                      const isMain = formData.adImageUrl === photo.url;
+
+                      return (
+                        <div
+                          key={photo.id}
+                          className={`relative rounded-lg border overflow-hidden bg-white shadow-2xs group flex flex-col ${
+                            isMain ? 'ring-2 ring-blue-500 border-blue-500' : 'border-slate-200'
+                          }`}
+                        >
+                          <div
+                            onClick={() =>
+                              setPreviewPhoto({
+                                url: displayUrl || photo.url,
+                                name: photo.name,
+                              })
+                            }
+                            className="aspect-video w-full bg-slate-100 cursor-pointer overflow-hidden relative"
+                          >
+                            <img
+                              src={displayUrl || photo.url}
+                              alt={photo.name}
+                              className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                              referrerPolicy="no-referrer"
+                            />
+                            <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white">
+                              <Maximize2 className="w-4 h-4" />
+                            </div>
+
+                            {/* Provider Tag */}
+                            <div className="absolute top-1 left-1">
+                              {photo.provider === 'both' ? (
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-600/90 text-white shadow-2xs">
+                                  ⚡ Ambos
+                                </span>
+                              ) : photo.provider === 'firebase' ? (
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-orange-600/90 text-white shadow-2xs flex items-center gap-0.5">
+                                  <Flame className="w-2.5 h-2.5" /> Firebase
+                                </span>
+                              ) : (
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-600/90 text-white shadow-2xs">
+                                  📁 Drive
+                                </span>
+                              )}
+                            </div>
+
+                            {isMain && (
+                              <div className="absolute top-1 right-1 bg-blue-600 text-white p-0.5 rounded text-[9px] font-bold flex items-center gap-0.5">
+                                <Star className="w-3 h-3 fill-current" />
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="p-1.5 flex items-center justify-between text-[11px] bg-slate-50 gap-1 border-t border-slate-100">
+                            <span className="truncate text-slate-700 font-medium" title={photo.name}>
+                              {photo.name}
+                            </span>
+                            <div className="flex items-center gap-1 shrink-0">
+                              {!isMain && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleSetAsMainPhoto(photo)}
+                                  className="text-[10px] text-blue-600 hover:text-blue-800 hover:underline font-semibold"
+                                  title="Definir esta foto como imagem principal da placa"
+                                >
+                                  Principal
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveGalleryPhoto(photo.id)}
+                                className="text-slate-400 hover:text-red-600 p-0.5 rounded"
+                                title="Remover foto"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1">
-                  Link / URL da Pasta de Fotos no Google Drive (caso já tenha tirado as fotos)
+                  Link / URL da Pasta de Fotos no Google Drive
                 </label>
                 <div className="flex gap-2">
                   <input
@@ -870,46 +1182,77 @@ export const PropertyModal: React.FC<PropertyModalProps> = ({
                 </div>
               </div>
             </div>
-          </form>
 
-          {/* Footer Buttons */}
-          <div className="flex items-center justify-between px-6 py-4 bg-slate-50 border-t border-slate-200">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
-            >
-              Cancelar
-            </button>
-            <button
-              type="button"
-              onClick={handleSubmit}
-              className="px-5 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-xs transition-colors"
-            >
-              {propertyToEdit ? 'Salvar Alterações' : 'Cadastrar Captação'}
-            </button>
-          </div>
+            {/* Footer Buttons */}
+            <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                className="px-5 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm transition-colors"
+              >
+                {propertyToEdit ? 'Salvar Alterações' : 'Cadastrar Captação'}
+              </button>
+            </div>
+          </form>
         </div>
       </div>
 
-      {/* Drive Browser Sub-Modal */}
+      {/* Lightbox / Preview modal for any photo clicked inside the modal */}
+      {previewPhoto && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-xs">
+          <div className="relative max-w-3xl w-full bg-slate-900 rounded-xl overflow-hidden shadow-2xl border border-slate-700">
+            <div className="flex items-center justify-between px-4 py-3 bg-slate-950 text-white">
+              <span className="text-xs font-semibold truncate max-w-md">
+                {previewPhoto.name}
+              </span>
+              <button
+                onClick={() => setPreviewPhoto(null)}
+                className="p-1 text-slate-400 hover:text-white rounded"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-4 flex items-center justify-center max-h-[75vh] overflow-hidden bg-black/50">
+              <img
+                src={previewPhoto.url}
+                alt={previewPhoto.name}
+                className="max-h-[70vh] w-auto object-contain rounded shadow-lg"
+                referrerPolicy="no-referrer"
+              />
+            </div>
+            <div className="flex items-center justify-between px-4 py-3 bg-slate-950 text-white text-xs border-t border-slate-800">
+              <a
+                href={previewPhoto.url}
+                target="_blank"
+                rel="noreferrer"
+                className="text-blue-400 hover:underline inline-flex items-center gap-1"
+              >
+                Abrir em nova aba <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+              <button
+                type="button"
+                onClick={() => setPreviewPhoto(null)}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded text-xs"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Google Drive Browser Modal */}
       {driveModalMode && (
         <DriveBrowserModal
           isOpen={true}
           onClose={() => setDriveModalMode(null)}
           mode={driveModalMode}
-          title={
-            driveModalMode === 'SELECT_PHOTO'
-              ? 'Navegar no Drive & Selecionar Foto da Placa'
-              : 'Navegar no Drive & Vincular Pasta de Fotos'
-          }
-          defaultFolderName={
-            formData.address && formData.address !== 'Sem endereço informado'
-              ? `Imóvel - ${formData.address.split(',')[0]} (Fotos)`
-              : 'Fotos do Imóvel Comercial'
-          }
-          isAuthenticated={isAuthenticated}
-          onRequireAuth={onRequireAuth}
           onSelect={(item) => {
             if (driveModalMode === 'SELECT_PHOTO') {
               setFormData((prev) => ({
@@ -917,8 +1260,9 @@ export const PropertyModal: React.FC<PropertyModalProps> = ({
                 adImageName: item.name,
                 adImageUrl: item.url,
                 adImageDriveId: item.driveId,
+                adImageStorageProvider: 'drive',
               }));
-            } else {
+            } else if (driveModalMode === 'SELECT_FOLDER') {
               setFormData((prev) => ({
                 ...prev,
                 photosFolderUrl: item.url,
@@ -926,6 +1270,12 @@ export const PropertyModal: React.FC<PropertyModalProps> = ({
               }));
             }
           }}
+          defaultFolderName={
+            formData.address && formData.address !== 'Sem endereço informado'
+              ? `Fotos - ${formData.address.replace(/[^\w\s-]/gi, '').trim()}`
+              : 'Fotos - Nova Captação'
+          }
+          currentPhotosFolderId={formData.photosFolderDriveId}
         />
       )}
     </>

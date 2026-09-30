@@ -11,10 +11,12 @@ export type PropertyStatus =
 
 export interface PropertyListing {
   id: string;
-  // 1. Imagem do anúncio/placa de telefone (Google Drive)
+  // 1. Imagem do anúncio/placa de telefone (Google Drive / Firebase)
   adImageName: string;
   adImageUrl: string;
   adImageDriveId?: string;
+  adImageStoragePath?: string;
+  adImageStorageProvider?: 'drive' | 'firebase' | 'both';
 
   // 2. Contato do proprietário ou imobiliária
   ownerName: string;
@@ -36,10 +38,11 @@ export interface PropertyListing {
   estimatedPrice?: string;
   areaSize?: string; // m²
 
-  // 6. Link da pasta das fotos do imóvel no Drive
+  // 6. Link da pasta das fotos do imóvel no Drive & Lista de Fotos
   photosFolderUrl: string;
   photosFolderDriveId?: string;
   photosCount?: number;
+  photosList?: PropertyPhotoItem[];
 
   // 7. Indicação do imóvel
   referrerName: string;
@@ -86,6 +89,17 @@ export interface ClientLead {
   notes: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface PropertyPhotoItem {
+  id: string;
+  name: string;
+  url: string;
+  driveId?: string;
+  storagePath?: string;
+  provider: 'drive' | 'firebase' | 'both' | 'local';
+  sizeFormatted?: string;
+  createdAt: string;
 }
 
 export interface DriveFileItem {
